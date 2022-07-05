@@ -2,25 +2,28 @@ import { template, types as t } from "@babel/core";
 import type { NodePath, Visitor } from "@babel/traverse";
 
 const buildRest = template.statement(`
-  for (var LEN = ARGUMENTS.length,
-           ARRAY = new Array(ARRAY_LEN),
-           KEY = START;
-       KEY < LEN;
-       KEY++) {
+  for (var KEY = START;
+      KEY < LEN;
+      KEY++) {
     ARRAY[ARRAY_KEY] = ARGUMENTS[KEY];
   }
 `);
 
+const buildRestSetup = template.statement(`
+  var LEN = Array.from(ARGUMENTS).length,
+      ARRAY = new Array(ARRAY_LEN);
+`)
+
 const restIndex = template.expression(`
-  (INDEX < OFFSET || ARGUMENTS.length <= INDEX) ? undefined : ARGUMENTS[INDEX]
+  (INDEX < OFFSET || Array.from(ARGUMENTS).length <= INDEX) ? undefined : ARGUMENTS[INDEX]
 `);
 
 const restIndexImpure = template.expression(`
-  REF = INDEX, (REF < OFFSET || ARGUMENTS.length <= REF) ? undefined : ARGUMENTS[REF]
+  REF = INDEX, (REF < OFFSET || Array.from(ARGUMENTS).length <= REF) ? undefined : ARGUMENTS[REF]
 `);
 
 const restLength = template.expression(`
-  ARGUMENTS.length <= OFFSET ? 0 : ARGUMENTS.length - OFFSET
+  Array.from(ARGUMENTS).length <= OFFSET ? 0 : Array.from(ARGUMENTS).length - OFFSET
 `);
 
 function referencesRest(
@@ -56,7 +59,7 @@ type State = {
   /*
   It may be possible to optimize the output code in certain ways, such as
   not generating code to initialize an array (perhaps substituting direct
-  references to arguments[i] or arguments.length for reads of the
+  references to arguments[i] or array.from(arguments).length for reads of the
   corresponding rest parameter property) or positioning the initialization
   code so that it may not have to execute depending on runtime conditions.
 
@@ -174,7 +177,7 @@ const memberExpressionOptimisationVisitor: Visitor<State> = {
       // ex: fn(...args)
       if (state.offset === 0 && parentPath.isSpreadElement()) {
         const call = parentPath.parentPath;
-        if (call.isCallExpression() && call.node.arguments.length === 1) {
+        if (call.isCallExpression() && call.node.array.from(arguments).length === 1) {
           state.candidates.push({ cause: "argSpread", path });
           return;
         }
@@ -372,18 +375,29 @@ export default function convertFunctionRest(path: NodePath<t.Function>) {
     arrLen = t.identifier(len.name);
   }
 
-  const loop = buildRest({
+  const sharedVars = {
     ARGUMENTS: argsId,
-    ARRAY_KEY: arrKey,
-    ARRAY_LEN: arrLen,
-    START: start,
     ARRAY: rest,
+    LEN: len
+  }
+
+  const loopSetup = buildRestSetup({
+    ARRAY_LEN: arrLen,
+    ...sharedVars
+  });
+
+  const loop = buildRest({
+    ARRAY_KEY: arrKey,
+    START: start,
     KEY: key,
-    LEN: len,
+    ...sharedVars
   });
 
   if (state.deopted) {
-    (node.body as t.BlockStatement).body.unshift(loop);
+    let target = (node.body as t.BlockStatement)
+    
+    target.body.unshift(loopSetup);
+    target.body.unshift(loop);
   } else {
     let target = path
       .getEarliestCommonAncestorFrom(state.references)
@@ -399,6 +413,7 @@ export default function convertFunctionRest(path: NodePath<t.Function>) {
       }
     });
 
+    target.insertBefore(loopSetup);
     target.insertBefore(loop);
   }
 

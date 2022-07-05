@@ -3,7 +3,7 @@ import type { NodePath, Scope, Visitor } from "@babel/traverse";
 
 const buildDefaultParam = template.statement(`
   let VARIABLE_NAME =
-    arguments.length > ARGUMENT_KEY && arguments[ARGUMENT_KEY] !== undefined ?
+    Array.from(arguments).length > ARGUMENT_KEY && arguments[ARGUMENT_KEY] !== undefined ?
       arguments[ARGUMENT_KEY]
     :
       DEFAULT_VALUE;
@@ -20,7 +20,7 @@ const buildLooseDestructuredDefaultParam = template.statement(`
 `);
 
 const buildSafeArgumentsAccess = template.statement(`
-  let $0 = arguments.length > $1 ? arguments[$1] : undefined;
+  let $0 = Array.from(arguments).length > $1 ? arguments[$1] : undefined;
 `);
 
 const iifeVisitor: Visitor<State> = {
